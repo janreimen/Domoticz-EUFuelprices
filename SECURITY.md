@@ -34,9 +34,10 @@ what this specific plugin does is narrow:
 - **Strict, fail-loud parsing.** Prices are never substituted with a fabricated value (e.g. zero) when
   missing or malformed - a bad response is rejected with a specific `ValueError` and the plugin simply
   keeps showing the last good value rather than writing bad data into your graphs.
-- **Known caveat:** the Mode4 reserve-sensor field names are a best-effort guess, not a verified schema
-  (see README and DEPLOY.md). That's a correctness risk, not a security one - a wrong guess fails loudly
-  rather than silently, and touches nothing outside its own three sensors.
+- **Resolved in 0.1.1-alpha:** the 0.1.0-alpha release shipped with a wrong field-name guess for the
+  Mode4 reserve sensors. That was a correctness bug, not a security one - the mismatch was silent rather
+  than loud (an optional field simply never populated) and never touched anything outside its own three
+  sensors. See CHANGELOG.md and DEPLOY.md for details.
 
 ## Reporting other issues
 

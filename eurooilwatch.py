@@ -6,13 +6,12 @@ exercise the parse_*() functions directly without a Domoticz runtime or a
 mock module. plugin.py is the only Domoticz-facing file; it imports this
 module.
 
-Two independent EuroOilWatch feeds live here:
+Two independent EuroOilWatch feeds live here, both schema-CONFIRMED against
+a live response:
 
   * /api/v1/prices  - weekly consumer petrol/diesel prices (parse_prices).
-    Schema CONFIRMED against a live response during development.
-  * /api/v1/stocks  - reserve days-of-cover (parse_stocks). Schema NOT
-    confirmed against a live response - see the warning on parse_stocks()
-    and DEPLOY.md before enabling it (Mode4).
+  * /api/v1/stocks  - reserve days-of-cover (parse_stocks). Confirmed
+    2026-09-21, replacing a wrong 0.1.0-alpha guess - see CHANGELOG.
 """
 
 import datetime
@@ -20,7 +19,7 @@ import json
 import math
 import urllib.request
 
-VERSION = '0.1.0-alpha'
+VERSION = '0.1.1-alpha'
 
 MAX_BYTES = 1024 * 1024
 
@@ -163,41 +162,39 @@ def fetch_prices(country, output):
 
 
 # --------------------------------------------------------------------------
-# /api/v1/stocks - reserve days-of-cover. UNVERIFIED schema - see warning.
+# /api/v1/stocks - reserve days-of-cover. Schema CONFIRMED 2026-09-21
+# against a live response (see CHANGELOG 0.1.1-alpha - the 0.1.0-alpha
+# guess was wrong; this replaced it).
 # --------------------------------------------------------------------------
 
 STOCKS_URL = 'https://eurooilwatch.com/api/v1/stocks'
 
-# Field names below are inferred from the endpoint's public description at
-# https://eurooilwatch.com/api ("a figure ... carries daysOfSupply null and
-# status 'unassessed' ... stockKilotonnes, consumptionKilotonnes and
-# averageDays may be null on the same terms") - NOT from a captured live
-# response, unlike UNIT_META/parse_prices above. Two shapes are tried:
-#   1. nested:  row[fuel_key]['daysOfSupply']
-#   2. flat:    row[fuel_key + 'DaysOfSupply']
-# If your live response uses neither, parse_stocks() raises a ValueError
-# naming the exact fuel_key it looked for - fix FUEL_KEY_FOR_UNIT to match
-# and nothing downstream needs to change. See DEPLOY.md "Before enabling
-# Mode4" for the one-`curl` check to run first.
+# Confirmed shape: each country row has a *list* under "fuels", one entry
+# per fuel, e.g. {"fuelType": "diesel", "daysOfSupply": 72.5, "status": ...,
+# "stockKilotonnes": ..., "consumptionKilotonnes": ..., "provenance": {...}}.
+# Note fuelType uses snake_case for jet fuel specifically ("jet_fuel"), not
+# "jetFuel" - the 0.1.0-alpha guess assumed uniform camelCase and missed
+# this, which is why it silently matched nothing (see CHANGELOG).
 STOCK_UNIT_META = {
-    7: {'label': 'Diesel - reserve cover', 'axis': 'days', 'fuel_key': 'diesel'},
-    8: {'label': 'Petrol - reserve cover', 'axis': 'days', 'fuel_key': 'petrol'},
-    9: {'label': 'Jet fuel - reserve cover', 'axis': 'days', 'fuel_key': 'jetFuel'},
+    7: {'label': 'Diesel - reserve cover', 'axis': 'days', 'fuel_type': 'diesel'},
+    8: {'label': 'Petrol - reserve cover', 'axis': 'days', 'fuel_type': 'petrol'},
+    9: {'label': 'Jet fuel - reserve cover', 'axis': 'days', 'fuel_type': 'jet_fuel'},
 }
 
 
 def parse_stocks(payload, country):
-    """Best-effort parse of /api/v1/stocks for one country. Returns a dict
-    of {unit_number: formatted_string} containing only the fuels for which
+    """Parse /api/v1/stocks for one country. Returns a dict of
+    {unit_number: formatted_string} containing only the fuels for which
     this cycle has an assessable (non-withheld) figure - a null/withheld
-    days-of-supply is not an error, it is simply omitted, exactly like an
-    optional field in parse_prices().
+    daysOfSupply (status "unassessed", e.g. a reported-zero pending review)
+    is not an error, it is simply omitted, exactly like an optional field
+    in parse_prices().
 
-    Unlike parse_prices(), a structurally missing country IS still a hard
-    error (something is badly wrong with the response), but a missing or
-    unrecognised per-fuel shape for a country that DOES exist is treated as
-    "no data this cycle" rather than crashing the whole update - a schema
-    mismatch on one fuel shouldn't take down the other two.
+    A structurally missing country, or a country row with no "fuels" list
+    at all, is a hard error (something is badly wrong with the response).
+    A single fuel entry that's missing from the list, or has an
+    unrecognised fuelType, is NOT fatal - it's simply left out of the
+    result, so one bad entry can't take down the other two.
     """
     if not isinstance(payload, dict) or not isinstance(payload.get('countries'), list):
         raise ValueError('API response is missing the countries list')
@@ -208,15 +205,21 @@ def parse_stocks(payload, country):
         raise ValueError('Country is missing or duplicated: ' + country)
     row = rows[0]
 
+    fuels = row.get('fuels')
+    if not isinstance(fuels, list):
+        raise ValueError('Country row is missing the fuels list: ' + country)
+
+    by_fuel_type = {}
+    for entry in fuels:
+        if isinstance(entry, dict) and isinstance(entry.get('fuelType'), str):
+            by_fuel_type[entry['fuelType']] = entry
+
     result = {}
     for unit, meta in STOCK_UNIT_META.items():
-        fuel_key = meta['fuel_key']
-        days = None
-        figure = row.get(fuel_key)
-        if isinstance(figure, dict):
-            days = optional_number(figure.get('daysOfSupply'))
-        if days is None:
-            days = optional_number(row.get(fuel_key + 'DaysOfSupply'))
+        entry = by_fuel_type.get(meta['fuel_type'])
+        if not isinstance(entry, dict):
+            continue
+        days = optional_number(entry.get('daysOfSupply'))
         if days is not None:
             result[unit] = format(days, '.1f')
     return result

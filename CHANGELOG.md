@@ -3,6 +3,32 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.1.1-alpha] - 2026-09-21
+
+### Fixed
+
+- **Mode4 reserve sensors (units 7-9) never updated - confirmed via a live Domoticz instance, where they
+  sat at the Domoticz-default `0 days` indefinitely.** Root cause: `parse_stocks()` guessed the wrong
+  `/api/v1/stocks` shape. The 0.1.0-alpha guess assumed either a nested `row["diesel"]["daysOfSupply"]`
+  object or a flat `row["dieselDaysOfSupply"]` key, keyed by `diesel` / `petrol` / `jetFuel`. The real
+  API instead puts a `"fuels"` **list** on each country row, one entry per fuel with a `fuelType` field
+  - and jet fuel's `fuelType` is `"jet_fuel"` (snake_case), not `"jetFuel"`. Neither guessed shape
+  matched anything, so `parse_stocks()` silently returned an empty result every cycle - by design, an
+  optional field that doesn't match is omitted rather than raising, which is correct behaviour for a
+  genuinely-missing figure but meant a *structurally* wrong guess failed silently instead of loudly.
+  Rewritten to parse the confirmed `fuels`-list shape; verified against a real captured API excerpt
+  (`REAL_STOCKS_PAYLOAD_EXCERPT` in `tests.py`, Luxembourg + a Lithuania row with a genuine withheld
+  jet-fuel figure), plus a regression test pinning down the snake_case `jet_fuel` key specifically.
+- `/api/v1/stocks` is now schema-CONFIRMED (see `eurooilwatch.py`'s module docstring) - the Mode4
+  "unverified schema" warnings in the plugin description, README, SECURITY.md, and DEPLOY.md are removed
+  accordingly.
+
+### If you're upgrading from 0.1.0-alpha with Mode4 already enabled
+
+`git pull` and restart the hardware instance - no config change needed, the next heartbeat repopulates
+units 7-9 with real values. Nothing needs cleaning up; the devices were never written with fabricated
+data, only left at their un-updated default.
+
 ## [0.1.0-alpha] - 2026-09-20
 
 ### Added

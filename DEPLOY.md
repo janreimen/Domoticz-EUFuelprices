@@ -36,23 +36,24 @@ Add a **separate hardware instance** per country - don't change the Country fiel
 instance if you want to keep its history. Changing it is detected and refused (`Domoticz.Error`) rather
 than silently reused, exactly so existing graph history is never overwritten by the wrong country.
 
-## Before enabling Mode4
+## Reserve sensors (Mode4)
 
-The reserve/stock sensors (units 7-9) parse `/api/v1/stocks`, and unlike the price sensors, that
-endpoint's exact field names were **not** confirmed against a live response while building this plugin
-(see `eurooilwatch.py`'s module docstring). Before turning Mode4 on:
+The reserve/stock sensors (units 7-9) parse `/api/v1/stocks`. As of **0.1.1-alpha this schema is
+confirmed** against a live response (`eurooilwatch.py`'s `REAL_STOCKS_PAYLOAD_EXCERPT` fixture in
+`tests.py` is a real excerpt): each country row carries a `fuels` list of
+`{fuelType, daysOfSupply, ...}` entries, and jet fuel's `fuelType` is `"jet_fuel"` (snake_case), not
+`"jetFuel"`.
+
+**If you enabled Mode4 under 0.1.0-alpha**, its field-name guess was wrong (it assumed a
+`row["diesel"]`-style nested/flat shape that doesn't exist) and every reserve sensor silently sat at its
+Domoticz-default `0 days` instead of updating - no error was logged, since a schema mismatch on an
+optional field is designed to omit quietly rather than crash. Update to 0.1.1-alpha and restart the
+hardware instance; the next heartbeat should populate real values within a few seconds. If a value still
+doesn't appear, re-check the live shape yourself:
 
 ```sh
 curl -s https://eurooilwatch.com/api/v1/stocks | python3 -m json.tool | less
 ```
-
-Look at one country's entry and compare it against the shape `parse_stocks()` expects (see the comment
-above `STOCK_UNIT_META` in `eurooilwatch.py`): either `row["diesel"]["daysOfSupply"]` (nested) or
-`row["dieselDaysOfSupply"]` (flat), same for `petrol` / `jetFuel`. If neither matches, adjust
-`STOCK_UNIT_META[unit]['fuel_key']` and/or the two lookups inside `parse_stocks()` to fit - the function
-already fails with a clear "Country is missing or duplicated" / silently-omits-that-fuel behaviour
-rather than showing a wrong number, so a mismatch is safe, just silent (the sensor simply never gets its
-first value) until you fix it.
 
 ## Uninstall
 

@@ -33,26 +33,67 @@ def sample_prices_payload(bulletin='2026-09-14', diesel=2.123, petrol=1.793,
     return payload
 
 
-def sample_stocks_payload(country='LU', diesel_days=54.0, petrol_days=42.5,
-                           jet_fuel_days=None, nested=True):
-    """diesel/petrol/jet_fuel_days=None means "withheld this cycle" - the
-    real API's zero-policy-2026-09 null convention. `nested` toggles
-    between the two shapes parse_stocks() tries (see its docstring)."""
-    def figure(days):
-        if days is None:
-            return {'daysOfSupply': None, 'status': 'unassessed'}
-        return {'daysOfSupply': days, 'status': 'ok'}
+def sample_stocks_payload(country='LU', diesel_days=72.5, petrol_days=47.4,
+                           jet_fuel_days=43.0):
+    """Confirmed schema: a "fuels" list of {fuelType, daysOfSupply, ...}
+    entries per country. *_days=None means "withheld this cycle" (the
+    real API's zero-policy-2026-09 null convention - status "unassessed")."""
+    def entry(fuel_type, days):
+        return {
+            'fuelType': fuel_type,
+            'daysOfSupply': days,
+            'status': 'unassessed' if days is None else 'critical',
+        }
 
-    row = {'countryCode': country, 'countryName': 'Luxembourg'}
-    if nested:
-        row['diesel'] = figure(diesel_days)
-        row['petrol'] = figure(petrol_days)
-        row['jetFuel'] = figure(jet_fuel_days)
-    else:
-        row['dieselDaysOfSupply'] = diesel_days
-        row['petrolDaysOfSupply'] = petrol_days
-        row['jetFuelDaysOfSupply'] = jet_fuel_days
+    row = {
+        'countryCode': country,
+        'countryName': 'Luxembourg',
+        'fuels': [
+            entry('petrol', petrol_days),
+            entry('diesel', diesel_days),
+            entry('jet_fuel', jet_fuel_days),
+        ],
+    }
     return {'countries': [row]}
+
+
+# A trimmed excerpt of a real /api/v1/stocks response (Luxembourg and
+# Lithuania rows), captured 2026-09-21 - Lithuania's jet_fuel figure is a
+# genuine withheld/null case ("reported-zero-unresolved"). This is the
+# fixture that caught the 0.1.0-alpha schema guess being wrong (it assumed
+# row['diesel']/row['petrol']/row['jetFuel'] nested objects, or flat
+# "<fuel>DaysOfSupply" keys - the real shape is a "fuels" list with a
+# fuelType field, and jet fuel uses snake_case "jet_fuel").
+REAL_STOCKS_PAYLOAD_EXCERPT = {
+    'countries': [
+        {
+            'countryCode': 'LT', 'countryName': 'Lithuania', 'datePeriod': '2026-06',
+            'fuels': [
+                {'fuelType': 'petrol', 'stockKilotonnes': 38.5, 'consumptionKilotonnes': 35.4,
+                 'daysOfSupply': 32.6, 'mandatoryMinimumDays': 90, 'status': 'critical'},
+                {'fuelType': 'diesel', 'stockKilotonnes': 368.4, 'consumptionKilotonnes': 145.4,
+                 'daysOfSupply': 76, 'mandatoryMinimumDays': 90, 'status': 'critical'},
+                {'fuelType': 'jet_fuel', 'stockKilotonnes': 0, 'consumptionKilotonnes': 13.9,
+                 'daysOfSupply': None, 'mandatoryMinimumDays': 90, 'status': 'unassessed',
+                 'provenance': {'coverWithheld': 'reported-zero-unresolved'}},
+            ],
+            'averageDays': 54.3, 'overallStatus': 'critical',
+        },
+        {
+            'countryCode': 'LU', 'countryName': 'Luxembourg', 'datePeriod': '2026-06',
+            'fuels': [
+                {'fuelType': 'petrol', 'stockKilotonnes': 59.255, 'consumptionKilotonnes': 37.54,
+                 'daysOfSupply': 47.4, 'mandatoryMinimumDays': 90, 'status': 'critical'},
+                {'fuelType': 'diesel', 'stockKilotonnes': 211.781, 'consumptionKilotonnes': 87.583,
+                 'daysOfSupply': 72.5, 'mandatoryMinimumDays': 90, 'status': 'critical'},
+                {'fuelType': 'jet_fuel', 'stockKilotonnes': 80.355, 'consumptionKilotonnes': 56.085,
+                 'daysOfSupply': 43, 'mandatoryMinimumDays': 90, 'status': 'critical'},
+            ],
+            'averageDays': 54.3, 'overallStatus': 'critical',
+        },
+    ],
+    'euAverage': {'petrolDays': 74.1, 'dieselDays': 93.8, 'jetFuelDays': 67.7, 'overallStatus': 'warning'},
+}
 
 
 TODAY = datetime.date(2026, 9, 20)
@@ -147,41 +188,61 @@ class ParsePricesTests(unittest.TestCase):
 
 
 class ParseStocksTests(unittest.TestCase):
-    """Schema is unverified against a live response (see eurooilwatch.py's
-    module docstring) - these tests pin down the two shapes parse_stocks()
-    is designed to tolerate, not a confirmed real payload."""
+    """Schema confirmed 2026-09-21 against a live response - see
+    REAL_STOCKS_PAYLOAD_EXCERPT above and CHANGELOG 0.1.1-alpha."""
 
-    def test_nested_shape_is_parsed(self):
-        payload = sample_stocks_payload(nested=True, diesel_days=54.0, petrol_days=42.5, jet_fuel_days=30.0)
+    def test_fuels_list_is_parsed(self):
+        payload = sample_stocks_payload(diesel_days=72.5, petrol_days=47.4, jet_fuel_days=43.0)
         result = eurooilwatch.parse_stocks(payload, 'LU')
-        self.assertEqual(result, {7: '54.0', 8: '42.5', 9: '30.0'})
-
-    def test_flat_fallback_shape_is_parsed(self):
-        payload = sample_stocks_payload(nested=False, diesel_days=54.0, petrol_days=42.5, jet_fuel_days=30.0)
-        result = eurooilwatch.parse_stocks(payload, 'LU')
-        self.assertEqual(result, {7: '54.0', 8: '42.5', 9: '30.0'})
+        self.assertEqual(result, {7: '72.5', 8: '47.4', 9: '43.0'})
 
     def test_withheld_figure_is_omitted_not_fatal(self):
-        # jetFuel withheld (null daysOfSupply, status "unassessed") must not
-        # block diesel/petrol from updating.
-        payload = sample_stocks_payload(nested=True, diesel_days=54.0, petrol_days=42.5, jet_fuel_days=None)
+        # jet_fuel withheld (null daysOfSupply, status "unassessed") must
+        # not block diesel/petrol from updating.
+        payload = sample_stocks_payload(jet_fuel_days=None)
         result = eurooilwatch.parse_stocks(payload, 'LU')
-        self.assertEqual(result, {7: '54.0', 8: '42.5'})
+        self.assertEqual(result, {7: '72.5', 8: '47.4'})
         self.assertNotIn(9, result)
 
-    def test_unrecognised_fuel_shape_is_omitted_not_fatal(self):
-        # A schema guess mismatch on one fuel must not crash the whole cycle.
-        payload = {'countries': [{'countryCode': 'LU', 'diesel': {'daysOfSupply': 54.0}}]}
+    def test_missing_fuel_entry_is_omitted_not_fatal(self):
+        # A fuel entirely absent from the list (not just null) must not
+        # block the other two either.
+        payload = {'countries': [{'countryCode': 'LU', 'fuels': [
+            {'fuelType': 'diesel', 'daysOfSupply': 72.5},
+        ]}]}
         result = eurooilwatch.parse_stocks(payload, 'LU')
-        self.assertEqual(result, {7: '54.0'})
+        self.assertEqual(result, {7: '72.5'})
+
+    def test_jet_fuel_type_is_snake_case_not_camel_case(self):
+        # Regression guard for the exact 0.1.0-alpha bug: the API uses
+        # fuelType "jet_fuel", not "jetFuel". A camelCase entry must NOT
+        # be picked up as a match.
+        payload = {'countries': [{'countryCode': 'LU', 'fuels': [
+            {'fuelType': 'jetFuel', 'daysOfSupply': 99.0},
+        ]}]}
+        result = eurooilwatch.parse_stocks(payload, 'LU')
+        self.assertNotIn(9, result)
 
     def test_country_missing_is_a_hard_error(self):
         with self.assertRaises(ValueError):
             eurooilwatch.parse_stocks(sample_stocks_payload(country='FR'), 'LU')
 
+    def test_fuels_list_missing_is_a_hard_error(self):
+        with self.assertRaises(ValueError):
+            eurooilwatch.parse_stocks({'countries': [{'countryCode': 'LU'}]}, 'LU')
+
     def test_malformed_payload_shape_is_a_hard_error(self):
         with self.assertRaises(ValueError):
             eurooilwatch.parse_stocks({'no_countries_key': True}, 'LU')
+
+    def test_real_payload_excerpt_luxembourg(self):
+        result = eurooilwatch.parse_stocks(REAL_STOCKS_PAYLOAD_EXCERPT, 'LU')
+        self.assertEqual(result, {7: '72.5', 8: '47.4', 9: '43.0'})
+
+    def test_real_payload_excerpt_lithuania_withheld_jet_fuel(self):
+        result = eurooilwatch.parse_stocks(REAL_STOCKS_PAYLOAD_EXCERPT, 'LT')
+        self.assertEqual(result, {7: '76.0', 8: '32.6'})
+        self.assertNotIn(9, result)
 
 
 class OptionalNumberTests(unittest.TestCase):
@@ -228,6 +289,11 @@ class UnitMetaConsistencyTests(unittest.TestCase):
 
     def test_country_count_matches_eu27(self):
         self.assertEqual(len(eurooilwatch.COUNTRIES), 27)
+
+    def test_stock_fuel_types_match_the_confirmed_api_vocabulary(self):
+        # Guards against re-introducing the 0.1.0-alpha camelCase bug.
+        fuel_types = {meta['fuel_type'] for meta in eurooilwatch.STOCK_UNIT_META.values()}
+        self.assertEqual(fuel_types, {'petrol', 'diesel', 'jet_fuel'})
 
 
 if __name__ == '__main__':

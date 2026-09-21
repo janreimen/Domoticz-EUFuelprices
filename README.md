@@ -6,9 +6,9 @@ countries, with optional week-on-week change, EU-27 average, and fuel-reserve se
 Data source: the [EuroOilWatch public API](https://eurooilwatch.com/api) (free, no key, CORS-enabled),
 itself sourced from the European Commission's Weekly Oil Bulletin (prices) and Eurostat (reserves).
 
-**Status: 0.1.0-alpha.** Core price sensors are solid and schema-verified. The reserve/stock sensors
-(Mode4) use a best-effort, not-yet-verified field-name guess - read
-["Before enabling Mode4"](DEPLOY.md#before-enabling-mode4) before turning them on.
+**Status: 0.1.1-alpha.** Both `/api/v1/prices` and `/api/v1/stocks` are now schema-confirmed against
+live responses. (0.1.0-alpha shipped with a wrong field-name guess for the reserve sensors - see
+[CHANGELOG.md](CHANGELOG.md) for what broke and how it was fixed.)
 
 ## What this is not
 
@@ -52,7 +52,7 @@ PT · RO · SK · SI · ES · SE
 | Country (Mode1) | any EU-27 code, default LU | one instance per country |
 | Price polling interval (Mode2) | 1 / 6 / 12 / 24 hours | default 6h; the bulletin itself only updates weekly |
 | Extra price sensors (Mode3) | prices only / + change % / + EU average / + both | default: prices only |
-| Reserve sensors (Mode4) | off / on | default off; see the warning above before enabling |
+| Reserve sensors (Mode4) | off / on | default off (opt-in, since it's a second endpoint + 3 more devices) |
 | Debug (Mode6) | no / yes | verbose Domoticz.Debug logging |
 
 Reserve sensors poll on a fixed 24-hour cadence regardless of Mode2 - the underlying Eurostat data has a

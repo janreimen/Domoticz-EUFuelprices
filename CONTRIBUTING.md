@@ -29,7 +29,10 @@ Include the plugin version (from the Domoticz log line at startup), your Domotic
 parsing bug - the relevant snippet of the raw API response (`curl` the endpoint directly) with any
 personal identifiers already stripped.
 
-## Schema fixes for Mode4
+## If a field-name guess turns out wrong again
 
-If you've confirmed the real `/api/v1/stocks` shape against a live response, that's an especially
-welcome PR - see "Before enabling Mode4" in [DEPLOY.md](DEPLOY.md) for what to check and where to fix it.
+Both endpoints this plugin uses are schema-confirmed as of 0.1.1-alpha, but EuroOilWatch can still change
+its API shape upstream. If a sensor stops updating, `curl` the endpoint (see DEPLOY.md), compare it
+against `parse_prices()` / `parse_stocks()` in `eurooilwatch.py`, and send a PR - include a trimmed,
+anonymised real-response excerpt as a `tests.py` fixture, the way `REAL_STOCKS_PAYLOAD_EXCERPT` already
+does, so the fix comes with regression coverage.

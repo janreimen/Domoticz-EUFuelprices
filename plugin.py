@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-<plugin key="EUFuelPrices" name="EU Fuel Prices - Petrol and Diesel" author="JanReimen" version="0.1.0-alpha" externallink="https://github.com/janreimen/Domoticz-EUFuelPrices">
+<plugin key="EUFuelPrices" name="EU Fuel Prices - Petrol and Diesel" author="JanReimen" version="0.1.1-alpha" externallink="https://github.com/janreimen/Domoticz-EUFuelPrices">
     <description>
         <h2>EU Fuel Prices</h2>
         <p>National weekly-average pump prices for petrol (Eurosuper 95) and diesel across the 27 EU
@@ -11,10 +11,6 @@
         <p><b>These are national weekly averages, not individual filling-station prices.</b> The upstream
         source does not publish a 98 RON / premium grade or LPG per country, so this plugin does not
         expose those - see the README for details.</p>
-        <p><b>Mode4 (reserve sensors) uses a field-name guess, not a confirmed schema</b> - unlike the
-        price sensors, this was not checked against a live response while building this plugin. It fails
-        loudly with the exact missing field name if the guess is wrong, rather than showing bad data. See
-        DEPLOY.md "Before enabling Mode4" before turning it on.</p>
         <p>To track more than one country, add a separate hardware instance per country; each instance
         keeps its own device history.</p>
     </description>
@@ -66,7 +62,7 @@
                 <option label="Prices + change % + EU-27 average" value="3"/>
             </options>
         </param>
-        <param field="Mode4" label="Reserve sensors (unverified schema)" width="200px" default="0">
+        <param field="Mode4" label="Reserve sensors" width="200px" default="0">
             <options>
                 <option label="Off" value="0" default="true"/>
                 <option label="On - days-of-cover for diesel/petrol/jet fuel" value="1"/>
