@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-<plugin key="EUFuelPrices" name="EU Fuel Prices - Petrol and Diesel" author="JanReimen" version="0.1.1-alpha" externallink="https://github.com/janreimen/Domoticz-EUFuelPrices">
+<plugin key="EUFuelPrices" name="EU Fuel Prices - Petrol and Diesel" author="JanReimen" version="1.2" externallink="https://github.com/janreimen/Domoticz-EUFuelPrices">
     <description>
         <h2>EU Fuel Prices</h2>
         <p>National weekly-average pump prices for petrol (Eurosuper 95) and diesel across the 27 EU
@@ -11,6 +11,11 @@
         <p><b>These are national weekly averages, not individual filling-station prices.</b> The upstream
         source does not publish a 98 RON / premium grade or LPG per country, so this plugin does not
         expose those - see the README for details.</p>
+        <p>Two Text sensors ("Prices - last updated", and "Reserves - last updated" when Mode4 is on)
+        record the last time each feed was <i>successfully</i> fetched - not the last time a value
+        changed, since diesel/petrol/reserve-days can legitimately sit unchanged for weeks. Each feed's
+        sensors (including its "last updated" text) stop being touched at all while that feed is failing,
+        so a stuck feed shows as stuck rather than quietly looking fine.</p>
         <p>To track more than one country, add a separate hardware instance per country; each instance
         keeps its own device history.</p>
     </description>
@@ -78,6 +83,7 @@
 </plugin>
 """
 
+import datetime
 import queue
 import threading
 import time
@@ -86,6 +92,16 @@ import Domoticz
 import eurooilwatch as fuel
 
 STOCKS_POLL_SECONDS = 24 * 3600  # Eurostat reserve data has a ~2-month lag; daily is already generous.
+
+# Unit of the Text sensor that records "when did this feed last succeed" -
+# see the class docstring-equivalent comment on onHeartbeat() for why this
+# is deliberately NOT "when did a value last change".
+PRICE_TIMESTAMP_UNIT = 10
+STOCKS_TIMESTAMP_UNIT = 11
+
+
+def _now_str():
+    return datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
 class BasePlugin:
@@ -99,6 +115,8 @@ class BasePlugin:
         self.next_price_fetch = 0
         self.price_failures = 0
         self.price_units = []
+        self.price_healthy = False
+        self.next_price_record = 0
 
         self.stocks_enabled = False
         self.stocks_worker = None
@@ -106,8 +124,8 @@ class BasePlugin:
         self.next_stocks_fetch = 0
         self.stocks_failures = 0
         self.stock_units = []
-
-        self.next_record = 0
+        self.stocks_healthy = False
+        self.next_stocks_record = 0
 
     def _meta(self, unit):
         return fuel.UNIT_META.get(unit) or fuel.STOCK_UNIT_META.get(unit)
@@ -148,11 +166,18 @@ class BasePlugin:
         for unit in all_units:
             meta = self._meta(unit)
             if unit not in Devices:
-                Domoticz.Device(
-                    Name='{} - {}'.format(meta['label'], fuel.COUNTRIES[self.country]),
-                    Unit=unit, DeviceID='EUFuel-{}-{}'.format(self.country, unit),
-                    TypeName='Custom', Options={'Custom': '1;' + meta['axis']}, Used=1
-                ).Create()
+                if meta.get('kind') == 'text':
+                    Domoticz.Device(
+                        Name='{} - {}'.format(meta['label'], fuel.COUNTRIES[self.country]),
+                        Unit=unit, DeviceID='EUFuel-{}-{}'.format(self.country, unit),
+                        TypeName='Text', Used=1
+                    ).Create()
+                else:
+                    Domoticz.Device(
+                        Name='{} - {}'.format(meta['label'], fuel.COUNTRIES[self.country]),
+                        Unit=unit, DeviceID='EUFuel-{}-{}'.format(self.country, unit),
+                        TypeName='Custom', Options={'Custom': '1;' + meta['axis']}, Used=1
+                    ).Create()
             if unit not in Devices:
                 Domoticz.Error('Could not create the sensor for unit {}. Enable "Allow new Hardware Devices" '
                                 'and restart the hardware instance.'.format(unit))
@@ -180,11 +205,17 @@ class BasePlugin:
             ' | reserve sensors: ' + ', '.join(fuel.STOCK_UNIT_META[u]['label'] for u in self.stock_units) if self.stock_units else ''))
         self.onHeartbeat()
 
-    def record(self):
-        for unit, value in self.cached.items():
-            if unit in Devices:
-                # Record unchanged values too so every graph has a continuous timeline.
-                Devices[unit].Update(nValue=0, sValue=value, TimedOut=0)
+    def record(self, units):
+        """Write every unit in `units` that currently has a cached value.
+        Called both right after a successful fetch and periodically to keep
+        each Custom sensor's graph continuous even while its value is
+        unchanged. Callers MUST scope `units` to one feed's own units -
+        writing another feed's units here would incorrectly clear that
+        feed's TimedOut flag even while it's genuinely failing (see
+        onHeartbeat(), and CHANGELOG 1.2 for the bug this replaced)."""
+        for unit in units:
+            if unit in self.cached and unit in Devices:
+                Devices[unit].Update(nValue=0, sValue=self.cached[unit], TimedOut=0)
 
     def mark_timeout(self, units):
         for unit in units:
@@ -208,22 +239,31 @@ class BasePlugin:
                 self.price_failures += 1
                 delay = min(3600, 300 * (2 ** min(self.price_failures - 1, 4)))
                 self.next_price_fetch = now + delay
+                self.price_healthy = False
                 self.mark_timeout(self.price_units)
                 Domoticz.Error('Price fetch failed: {}. Previous values are retained; retrying in {} minutes.'.format(error, delay // 60))
             else:
                 changed = any(self.cached.get(u) != v for u, v in prices.items()) or bulletin != self.bulletin
                 self.cached.update(prices)
+                self.cached[PRICE_TIMESTAMP_UNIT] = _now_str()
                 self.bulletin = bulletin
                 self.price_failures = 0
+                self.price_healthy = True
                 self.next_price_fetch = now + self.price_interval
-                self.record()
-                self.next_record = now + 300
+                self.record(self.price_units)
+                self.next_price_record = now + 300
                 if changed:
                     Domoticz.Log('{} | bulletin {} | Diesel {} €/l | Petrol {} €/l'.format(
                         self.country, bulletin, prices[1], prices[2]))
         if self.price_worker is None and now >= self.next_price_fetch:
             self.price_worker = threading.Thread(target=fuel.fetch_prices, args=(self.country, self.price_results), daemon=True)
             self.price_worker.start()
+        # Keep the graph continuous while this feed is healthy; a failing
+        # feed is left alone entirely (values AND its TimedOut flag) until
+        # it recovers, rather than being touched by a shared/generic timer.
+        if self.price_healthy and now >= self.next_price_record:
+            self.record(self.price_units)
+            self.next_price_record = now + 300
 
         # --- Stocks feed (optional, Mode4) ------------------------------
         if self.stocks_enabled:
@@ -237,22 +277,23 @@ class BasePlugin:
                     self.stocks_failures += 1
                     delay = min(6 * 3600, 1800 * (2 ** min(self.stocks_failures - 1, 4)))
                     self.next_stocks_fetch = now + delay
+                    self.stocks_healthy = False
                     self.mark_timeout(self.stock_units)
                     Domoticz.Error('Reserve fetch failed: {}. Previous values are retained; retrying in {} minutes.'.format(error, delay // 60))
                 else:
                     self.cached.update(values)
+                    self.cached[STOCKS_TIMESTAMP_UNIT] = _now_str()
                     self.stocks_failures = 0
+                    self.stocks_healthy = True
                     self.next_stocks_fetch = now + STOCKS_POLL_SECONDS
-                    self.record()
-                    self.next_record = now + 300
+                    self.record(self.stock_units)
+                    self.next_stocks_record = now + 300
             if self.stocks_worker is None and now >= self.next_stocks_fetch:
                 self.stocks_worker = threading.Thread(target=fuel.fetch_stocks, args=(self.country, self.stocks_results), daemon=True)
                 self.stocks_worker.start()
-
-        # --- Keep every device's graph continuous ------------------------
-        if self.cached and now >= self.next_record:
-            self.record()
-            self.next_record = now + 300
+            if self.stocks_healthy and now >= self.next_stocks_record:
+                self.record(self.stock_units)
+                self.next_stocks_record = now + 300
 
     def onStop(self):
         self.enabled = False

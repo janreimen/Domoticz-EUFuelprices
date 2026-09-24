@@ -19,7 +19,7 @@ import json
 import math
 import urllib.request
 
-VERSION = '0.1.1-alpha'
+VERSION = '1.2'
 
 MAX_BYTES = 1024 * 1024
 
@@ -76,7 +76,10 @@ PRICES_URL = 'https://eurooilwatch.com/api/v1/prices'
 # Every price sensor this plugin can create. 'group' ties a unit to the
 # Mode3 choice that enables it; unit numbers are stable forever, even for
 # groups a given install never enables, so re-enabling a group later never
-# collides with a differently-purposed unit.
+# collides with a differently-purposed unit. 'kind': 'text' marks a Domoticz
+# Text device (a timestamp string) rather than the default Custom numeric
+# sensor - plugin.py branches on this when creating devices; both kinds are
+# written the same way afterwards (Update(nValue=0, sValue=<string>)).
 UNIT_META = {
     1: {'label': 'Diesel', 'axis': '€/l', 'group': 'core'},
     2: {'label': 'Petrol (Eurosuper 95)', 'axis': '€/l', 'group': 'core'},
@@ -84,6 +87,7 @@ UNIT_META = {
     4: {'label': 'Petrol - weekly change', 'axis': '%', 'group': 'pct'},
     5: {'label': 'Diesel - EU-27 average', 'axis': '€/l', 'group': 'euavg'},
     6: {'label': 'Petrol - EU-27 average', 'axis': '€/l', 'group': 'euavg'},
+    10: {'label': 'Prices - last updated', 'group': 'core', 'kind': 'text'},
 }
 MODE3_GROUPS = {
     '0': {'core'},
@@ -179,6 +183,7 @@ STOCK_UNIT_META = {
     7: {'label': 'Diesel - reserve cover', 'axis': 'days', 'fuel_type': 'diesel'},
     8: {'label': 'Petrol - reserve cover', 'axis': 'days', 'fuel_type': 'petrol'},
     9: {'label': 'Jet fuel - reserve cover', 'axis': 'days', 'fuel_type': 'jet_fuel'},
+    11: {'label': 'Reserves - last updated', 'kind': 'text'},
 }
 
 
@@ -216,6 +221,8 @@ def parse_stocks(payload, country):
 
     result = {}
     for unit, meta in STOCK_UNIT_META.items():
+        if 'fuel_type' not in meta:
+            continue  # unit 11 ("last updated") isn't parsed from the API - plugin.py sets it
         entry = by_fuel_type.get(meta['fuel_type'])
         if not isinstance(entry, dict):
             continue

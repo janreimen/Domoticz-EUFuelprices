@@ -6,9 +6,11 @@ countries, with optional week-on-week change, EU-27 average, and fuel-reserve se
 Data source: the [EuroOilWatch public API](https://eurooilwatch.com/api) (free, no key, CORS-enabled),
 itself sourced from the European Commission's Weekly Oil Bulletin (prices) and Eurostat (reserves).
 
-**Status: 0.1.1-alpha.** Both `/api/v1/prices` and `/api/v1/stocks` are now schema-confirmed against
-live responses. (0.1.0-alpha shipped with a wrong field-name guess for the reserve sensors - see
-[CHANGELOG.md](CHANGELOG.md) for what broke and how it was fixed.)
+**Status: 1.2.** No longer alpha-tagged as of this release. Both `/api/v1/prices` and `/api/v1/stocks`
+are schema-confirmed against live responses, and each feed now tracks its own "last successfully
+fetched" timestamp with correctly-scoped staleness detection - see
+[CHANGELOG.md](CHANGELOG.md) for the full history, including what broke and was fixed in earlier
+0.1.x-alpha releases.
 
 ## What this is not
 
@@ -23,8 +25,8 @@ live responses. (0.1.0-alpha shipped with a wrong field-name guess for the reser
 ## Devices
 
 One hardware instance = one country. Add another instance per additional country; each keeps its own
-device history. Units 1-6 come from `/api/v1/prices`; units 7-9 are the optional Mode4 reserve sensors
-from `/api/v1/stocks`.
+device history. Units 1-6 and 10 come from `/api/v1/prices`; units 7-9 and 11 are the optional Mode4
+reserve sensors from `/api/v1/stocks`.
 
 | Unit | Sensor | Axis | Enabled by |
 |---|---|---|---|
@@ -37,6 +39,14 @@ from `/api/v1/stocks`.
 | 7 | Diesel - reserve cover | days | Mode4 = 1 |
 | 8 | Petrol - reserve cover | days | Mode4 = 1 |
 | 9 | Jet fuel - reserve cover | days | Mode4 = 1 |
+| 10 | Prices - last updated | text | always |
+| 11 | Reserves - last updated | text | Mode4 = 1 |
+
+Units 10/11 record the last time that feed was **successfully fetched**, not the last time a value
+changed - diesel/petrol/reserve-days can legitimately sit unchanged for weeks, and a "last changed"
+timestamp would make a perfectly healthy plugin indistinguishable from a dead one. If a feed starts
+failing, its sensors (including its "last updated" text and its `TimedOut` flag) simply stop being
+touched until it recovers - they don't quietly keep looking fine.
 
 ## Supported countries
 

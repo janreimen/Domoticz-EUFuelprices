@@ -3,6 +3,33 @@
 All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [1.2] - 2026-09-23
+
+First release not tagged alpha - the schema-confirmation work in 0.1.1-alpha, plus this release's fixes
+below, are what earned that.
+
+### Added
+
+- **Per-feed "last successfully fetched" timestamp sensors**: unit 10 ("Prices - last updated", always
+  on) and unit 11 ("Reserves - last updated", Mode4 only), both Domoticz Text devices. Deliberately track
+  the last *successful fetch*, not the last *value change* - diesel/petrol/reserve-days can legitimately
+  sit unchanged for weeks, and a "last changed" timestamp would make a perfectly healthy plugin
+  indistinguishable from a dead one at a glance. See "Freshness" in DEPLOY.md.
+
+### Fixed
+
+- **The periodic graph-continuity touch could silently clear a failing feed's `TimedOut` flag.**
+  `record()` used to iterate the *entire* shared cache unconditionally on every 5-minute continuity pass,
+  regardless of which feed a given unit belonged to. If reserves (Mode4) were failing and correctly
+  marked `TimedOut=1` by `mark_timeout()`, the next scheduled continuity touch - driven by a single
+  shared `next_record` timer that either feed's success could reset - would re-write those same reserve
+  units with `TimedOut=0`, silently clearing the stale flag while the feed was still genuinely down.
+  Prices and reserves now have fully independent scheduling: separate `next_price_record` /
+  `next_stocks_record` timers, separate `price_healthy` / `stocks_healthy` flags, and `record()` now
+  takes an explicit `units` argument so each feed can only ever touch its own devices. A failing feed's
+  sensors (data and the new "last updated" text alike) are simply left alone - not touched at all - until
+  that feed's next successful fetch.
+
 ## [0.1.1-alpha] - 2026-09-21
 
 ### Fixed

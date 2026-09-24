@@ -291,9 +291,30 @@ class UnitMetaConsistencyTests(unittest.TestCase):
         self.assertEqual(len(eurooilwatch.COUNTRIES), 27)
 
     def test_stock_fuel_types_match_the_confirmed_api_vocabulary(self):
-        # Guards against re-introducing the 0.1.0-alpha camelCase bug.
-        fuel_types = {meta['fuel_type'] for meta in eurooilwatch.STOCK_UNIT_META.values()}
+        # Guards against re-introducing the 0.1.0-alpha camelCase bug. Only
+        # applies to fuel-backed units - unit 11 ("last updated") has no
+        # fuel_type, it's a plugin.py-set timestamp, not API-parsed data.
+        fuel_types = {meta['fuel_type'] for meta in eurooilwatch.STOCK_UNIT_META.values()
+                      if 'fuel_type' in meta}
         self.assertEqual(fuel_types, {'petrol', 'diesel', 'jet_fuel'})
+
+    def test_text_units_are_excluded_from_parse_stocks_output(self):
+        # Unit 11 ("Reserves - last updated") is a Text device plugin.py
+        # writes directly - parse_stocks() must never try to look it up in
+        # the API response (it has no fuel_type to match against).
+        payload = sample_stocks_payload()
+        result = eurooilwatch.parse_stocks(payload, 'LU')
+        self.assertNotIn(11, result)
+
+    def test_every_stock_unit_without_fuel_type_is_marked_text(self):
+        for unit, meta in eurooilwatch.STOCK_UNIT_META.items():
+            if 'fuel_type' not in meta:
+                self.assertEqual(meta.get('kind'), 'text', 'unit {} has neither fuel_type nor kind=text'.format(unit))
+
+    def test_every_price_unit_without_axis_is_marked_text(self):
+        for unit, meta in eurooilwatch.UNIT_META.items():
+            if 'axis' not in meta:
+                self.assertEqual(meta.get('kind'), 'text', 'unit {} has neither axis nor kind=text'.format(unit))
 
 
 if __name__ == '__main__':

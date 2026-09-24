@@ -47,13 +47,26 @@ confirmed** against a live response (`eurooilwatch.py`'s `REAL_STOCKS_PAYLOAD_EX
 **If you enabled Mode4 under 0.1.0-alpha**, its field-name guess was wrong (it assumed a
 `row["diesel"]`-style nested/flat shape that doesn't exist) and every reserve sensor silently sat at its
 Domoticz-default `0 days` instead of updating - no error was logged, since a schema mismatch on an
-optional field is designed to omit quietly rather than crash. Update to 0.1.1-alpha and restart the
-hardware instance; the next heartbeat should populate real values within a few seconds. If a value still
-doesn't appear, re-check the live shape yourself:
+optional field is designed to omit quietly rather than crash. Update to the current version and restart
+the hardware instance; the next heartbeat should populate real values within a few seconds. If a value
+still doesn't appear, re-check the live shape yourself:
 
 ```sh
 curl -s https://eurooilwatch.com/api/v1/stocks | python3 -m json.tool | less
 ```
+
+## Freshness: the "last updated" text sensors
+
+Units 10 ("Prices - last updated") and 11 ("Reserves - last updated", Mode4 only) hold the local
+timestamp of the last **successful** fetch of that feed - not the last time a value changed. This is
+deliberate: use these two sensors (or each feed's `TimedOut` flag) to answer "is this plugin alive",
+and use the value sensors' own graphs, or the Domoticz log's per-change log lines, to answer "when did
+the price/reserve actually move". Conflating the two would make a healthy plugin sitting on an unchanged
+value for weeks look identical to a dead one.
+
+Each feed's sensors - including its "last updated" text and its `TimedOut` flag - are only touched while
+that feed is healthy. If prices are failing but reserves are fine (or vice versa), only the failing
+feed's sensors freeze; the other feed keeps updating normally.
 
 ## Uninstall
 
